@@ -13,9 +13,20 @@ const reportRoutes = require("./routes/report.routes");
 const errorHandler = require("./middleware/errorHandler");
 const app = express();
 
+const allowedOrigins = [
+  "http://localhost:4200",
+  "https://erp-tracker-sigma.vercel.app",
+];
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || "*",
-  credentials: true
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
 }));
 
 app.use(express.json({ limit: "2mb" }));
