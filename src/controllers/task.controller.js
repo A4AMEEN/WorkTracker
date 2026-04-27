@@ -34,7 +34,7 @@ const mapAttachments = (files = [], userName) => {
   return files.map((file) => ({
     originalName: file.originalname,
     fileName: file.filename,
-    filePath: `/uploads/tasks/${file.filename}`,
+   filePath: file.path, // Cloudinary URL,
     mimeType: file.mimetype,
     size: file.size,
     uploadedBy: userName,

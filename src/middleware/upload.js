@@ -1,30 +1,21 @@
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
+const cloudinary = require("../config/cloudinary");
 
-const isVercel = process.env.VERCEL === "1";
-
-const uploadDir = isVercel
-  ? path.join("/tmp", "uploads", "tasks")
-  : path.join(process.cwd(), "uploads", "tasks");
-
-fs.mkdirSync(uploadDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-
-  filename: function (req, file, cb) {
-    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, unique + path.extname(file.originalname));
-  },
+// Cloudinary storage config
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req, file) => ({
+    folder: "worktrack/tasks", // folder in cloudinary
+    resource_type: "auto", // supports images, pdf, docs
+    public_id: `${Date.now()}-${file.originalname.split(".")[0]}`,
+  }),
 });
 
 const upload = multer({
   storage,
   limits: {
-    fileSize: 10 * 1024 * 1024,
+    fileSize: 10 * 1024 * 1024, // 10MB
   },
 });
 
