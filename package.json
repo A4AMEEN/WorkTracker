@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "WorkTrack Company Task Management Backend API",
   "main": "src/server.js",
-  "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
-    "seed": "node src/seeders/seedUsers.js"
-  },
+"scripts": {
+  "dev": "nodemon src/local.js",
+  "start": "node src/local.js",
+  "seed": "node src/seeders/seedUsers.js"
+},
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
