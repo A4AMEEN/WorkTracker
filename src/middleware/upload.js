@@ -2,16 +2,19 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-const uploadDir = path.join(process.cwd(), "uploads", "tasks");
+const isVercel = process.env.VERCEL === "1";
 
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+const uploadDir = isVercel
+  ? path.join("/tmp", "uploads", "tasks")
+  : path.join(process.cwd(), "uploads", "tasks");
+
+fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadDir);
   },
+
   filename: function (req, file, cb) {
     const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
     cb(null, unique + path.extname(file.originalname));
