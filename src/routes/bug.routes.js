@@ -8,6 +8,7 @@ const {
   updateBugStatus,
   deleteBug,
   convertToTask,
+  deleteBugAttachment,
 } = require("../controllers/bug.controller");
 
 const { protect, allowRoles } = require("../middleware/auth");
@@ -21,14 +22,14 @@ router.post(
   "/",
   allowRoles("Admin", "Developer"),
   upload.array("attachments", 10),
-  createBug
+  createBug,
 );
 
 router.put(
   "/:id",
   allowRoles("Admin", "Developer"),
   upload.array("attachments", 10),
-  updateBug
+  updateBug,
 );
 
 router.patch("/:id/status", updateBugStatus);
@@ -37,4 +38,9 @@ router.post("/:id/convert-to-task", convertToTask);
 
 router.delete("/:id", allowRoles("Admin"), deleteBug);
 
+router.delete(
+  "/:id/attachments/:fileName",
+  allowRoles("Admin", "Developer"),
+  deleteBugAttachment,
+);
 module.exports = router;

@@ -9,15 +9,17 @@ exports.getBugs = async (req, res) => {
 
 // CREATE
 exports.createBug = async (req, res) => {
-  const attachments = (req.files || []).map(file => ({
+const mapBugAttachments = (files = [], userName) => {
+  return files.map((file) => ({
     originalName: file.originalname,
-    fileName: file.filename,
-    filePath: `/uploads/tasks/${file.filename}`,
+    fileName: file.filename || file.public_id || file.originalname,
+    filePath: file.path || file.secure_url,
     mimeType: file.mimetype,
     size: file.size,
-    uploadedBy: req.user.name,
+    uploadedBy: userName,
   }));
-
+};
+const attachments = mapBugAttachments(req.files || [], req.user.name);
   const bug = await Bug.create({
     ...req.body,
     reportedBy: req.user.name,
@@ -47,16 +49,19 @@ exports.updateBug = async (req, res) => {
   Object.assign(bug, req.body);
 
   if (req.files?.length) {
-    const newFiles = req.files.map(file => ({
-      originalName: file.originalname,
-      fileName: file.filename,
-      filePath: `/uploads/tasks/${file.filename}`,
-      mimeType: file.mimetype,
-      size: file.size,
-      uploadedBy: req.user.name,
-    }));
+const mapBugAttachments = (files = [], userName) => {
+  return files.map((file) => ({
+    originalName: file.originalname,
+    fileName: file.filename || file.public_id || file.originalname,
+    filePath: file.path || file.secure_url,
+    mimeType: file.mimetype,
+    size: file.size,
+    uploadedBy: userName,
+  }));
+};
 
-    bug.attachments.push(...newFiles);
+const newFiles = mapBugAttachments(req.files || [], req.user.name);
+bug.attachments.push(...newFiles);
   }
 
   await bug.save();
@@ -76,6 +81,42 @@ exports.updateBugStatus = async (req, res) => {
   await bug.save();
 
   res.json({ success: true, data: bug });
+};
+
+exports.deleteBugAttachment = async (req, res) => {
+  const { id, fileName } = req.params;
+
+  const bug = await Bug.findById(id);
+
+  if (!bug) {
+    return res.status(404).json({
+      success: false,
+      message: "Bug not found",
+    });
+  }
+
+  const attachment = (bug.attachments || []).find(
+    (file) => file.fileName === fileName
+  );
+
+  if (!attachment) {
+    return res.status(404).json({
+      success: false,
+      message: "Attachment not found",
+    });
+  }
+
+  bug.attachments = bug.attachments.filter(
+    (file) => file.fileName !== fileName
+  );
+
+  await bug.save();
+
+  res.json({
+    success: true,
+    message: "Attachment deleted",
+    data: bug,
+  });
 };
 
 // DELETE
