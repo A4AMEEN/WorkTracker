@@ -77,6 +77,24 @@ const taskSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    deadlineDate: {
+  type: String,
+  default: "",
+},
+deadlineTime: {
+  type: String,
+  default: "",
+},
+deadlineAt: {
+  type: Date,
+  default: null,
+},
+estimatedHours: {
+  type: Number,
+  default: 0,
+},
+
+
     attachments: [
   {
     originalName: String,

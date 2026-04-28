@@ -2,7 +2,7 @@ const Task = require("../models/Task");
 const TaskHistory = require("../models/TaskHistory");
 const asyncHandler = require("../utils/asyncHandler");
 const { toDateOnly, getDayName } = require("../utils/dateUtils");
-
+const { createNotification } = require("../utils/notify");
 const carryForwardStatuses = [
   "Pending",
   "Working",
@@ -34,7 +34,7 @@ const mapAttachments = (files = [], userName) => {
   return files.map((file) => ({
     originalName: file.originalname,
     fileName: file.filename,
-   filePath: file.path, // Cloudinary URL,
+    filePath: file.path, // Cloudinary URL,
     mimeType: file.mimetype,
     size: file.size,
     uploadedBy: userName,
@@ -137,6 +137,14 @@ const createTask = asyncHandler(async (req, res) => {
   const date = req.body.date || toDateOnly();
   const attachments = mapAttachments(req.files || [], req.user.name);
 
+  const finalDeadlineDate = req.body.deadlineDate || date;
+  const finalDeadlineTime = req.body.deadlineTime || "";
+
+  const deadlineAt =
+    finalDeadlineDate && finalDeadlineTime
+      ? new Date(`${finalDeadlineDate}T${finalDeadlineTime}:00`)
+      : null;
+
   const task = await Task.create({
     date,
     day: getDayName(date),
@@ -150,8 +158,23 @@ const createTask = asyncHandler(async (req, res) => {
     remarks: req.body.remarks || "",
     createdBy: req.user.name,
     updatedBy: req.user.name,
+    deadlineDate: finalDeadlineTime ? finalDeadlineDate : "",
+    deadlineTime: finalDeadlineTime,
+    deadlineAt,
+    estimatedHours: Number(req.body.estimatedHours || 0),
+
     attachments,
   });
+
+  await createNotification({
+  userName: task.person,
+  title: "New task assigned",
+  message: `${task.createdBy} assigned you a task: ${task.description}`,
+  type: "TASK_ASSIGNED",
+  targetType: "Task",
+  targetId: task._id,
+  createdBy: req.user.name,
+});
 
   await addHistory({
     task,
@@ -194,6 +217,9 @@ const updateTask = asyncHandler(async (req, res) => {
     "person",
     "priority",
     "remarks",
+    "deadlineDate",
+    "deadlineTime",
+    "estimatedHours",
   ];
 
   for (const field of editableFields) {
@@ -232,6 +258,18 @@ const updateTask = asyncHandler(async (req, res) => {
       remark: "Attachment uploaded",
     });
   }
+const finalDeadlineDate = task.deadlineDate || task.date;
+const finalDeadlineTime = task.deadlineTime || "";
+
+if (finalDeadlineTime) {
+  task.deadlineDate = finalDeadlineDate;
+  task.deadlineTime = finalDeadlineTime;
+  task.deadlineAt = new Date(`${finalDeadlineDate}T${finalDeadlineTime}:00`);
+} else {
+  task.deadlineDate = "";
+  task.deadlineTime = "";
+  task.deadlineAt = null;
+}
 
   task.updatedBy = req.user.name;
   await task.save();
@@ -281,6 +319,15 @@ const updateTaskStatus = asyncHandler(async (req, res) => {
 
   task.updatedBy = req.user.name;
   await task.save();
+  await createNotification({
+  userName: task.person,
+  title: "Task updated",
+  message: `Task updated: ${task.description}`,
+  type: "STATUS_UPDATE",
+  targetType: "Task",
+  targetId: task._id,
+  createdBy: req.user.name,
+});
 
   res.json({ success: true, data: task });
 });
@@ -308,6 +355,15 @@ const updateTestResult = asyncHandler(async (req, res) => {
     task.testedBy = req.user.name;
     task.testRemarks = remark || "Testing failed, rework needed";
     task.reworkCount = (task.reworkCount || 0) + 1;
+    await createNotification({
+  userName: task.person,
+  title: "Rework assigned",
+  message: `Testing failed. Rework needed: ${task.description}`,
+  type: "REWORK",
+  targetType: "Task",
+  targetId: task._id,
+  createdBy: req.user.name,
+});
   }
 
   task.updatedBy = req.user.name;
@@ -365,7 +421,7 @@ const deleteTaskAttachment = asyncHandler(async (req, res) => {
   }
 
   const attachment = (task.attachments || []).find(
-    (file) => file.fileName === fileName
+    (file) => file.fileName === fileName,
   );
 
   if (!attachment) {
@@ -376,7 +432,7 @@ const deleteTaskAttachment = asyncHandler(async (req, res) => {
   }
 
   task.attachments = task.attachments.filter(
-    (file) => file.fileName !== fileName
+    (file) => file.fileName !== fileName,
   );
 
   const filePath = path.join(process.cwd(), "uploads", "tasks", fileName);
@@ -412,5 +468,5 @@ module.exports = {
   updateTaskStatus,
   updateTestResult,
   deleteTask,
-  deleteTaskAttachment
+  deleteTaskAttachment,
 };
