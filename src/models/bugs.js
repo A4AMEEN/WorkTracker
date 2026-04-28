@@ -30,7 +30,10 @@ const bugSchema = new mongoose.Schema(
 
     assignedTo: { type: String, default: "" },
     reportedBy: { type: String, required: true },
-
+    payload: {
+      type: String,
+      default: "",
+    },
     linkedTaskId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Task",
@@ -51,7 +54,8 @@ const bugSchema = new mongoose.Schema(
 
     remarks: { type: String, default: "" },
   },
-  { timestamps: true }
+
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("Bug", bugSchema);

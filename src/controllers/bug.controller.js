@@ -111,6 +111,13 @@ exports.deleteBugAttachment = async (req, res) => {
   );
 
   await bug.save();
+  if (bug.payload) {
+  bug.attachments.push({
+    originalName: 'payload.txt',
+    fileName: 'payload.txt',
+    filePath: `data:text/plain;charset=utf-8,${encodeURIComponent(bug.payload)}`
+  });
+}
 
   res.json({
     success: true,
