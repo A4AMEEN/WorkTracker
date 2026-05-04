@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const connectDB = async () => {
   try {
-    if (!process.env.MONGO_URI) {
+    if (!process.env.MONGO_URI || process.env.MONGO_URI.trim() === "") {
       throw new Error("MONGO_URI is missing");
     }
 

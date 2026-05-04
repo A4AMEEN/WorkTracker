@@ -25,6 +25,10 @@ const taskSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    completedAt: {
+      type: Date,
+      default: null,
+    },
     workingType: {
       type: String,
       enum: ["Frontend", "Backend", "Both"],
@@ -78,37 +82,36 @@ const taskSchema = new mongoose.Schema(
       default: "",
     },
     deadlineDate: {
-  type: String,
-  default: "",
-},
-deadlineTime: {
-  type: String,
-  default: "",
-},
-deadlineAt: {
-  type: Date,
-  default: null,
-},
-estimatedHours: {
-  type: Number,
-  default: 0,
-},
-
+      type: String,
+      default: "",
+    },
+    deadlineTime: {
+      type: String,
+      default: "",
+    },
+    deadlineAt: {
+      type: Date,
+      default: null,
+    },
+    estimatedHours: {
+      type: Number,
+      default: 0,
+    },
 
     attachments: [
-  {
-    originalName: String,
-    fileName: String,
-    filePath: String,
-    mimeType: String,
-    size: Number,
-    uploadedBy: String,
-    uploadedAt: {
-      type: Date,
-      default: Date.now
-    }
-  }
-]
+      {
+        originalName: String,
+        fileName: String,
+        filePath: String,
+        mimeType: String,
+        size: Number,
+        uploadedBy: String,
+        uploadedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   { timestamps: true },
 );

@@ -302,6 +302,12 @@ const updateTaskStatus = asyncHandler(async (req, res) => {
     });
 
     task.status = status;
+
+    if (status === "Done" || status === "Test Done") {
+      task.completedAt = new Date();
+    } else {
+      task.completedAt = null;
+    }
   }
 
   if (remark) {
@@ -319,19 +325,19 @@ const updateTaskStatus = asyncHandler(async (req, res) => {
 
   task.updatedBy = req.user.name;
   await task.save();
+
   await createNotification({
-  userName: task.person,
-  title: "Task updated",
-  message: `Task updated: ${task.description}`,
-  type: "STATUS_UPDATE",
-  targetType: "Task",
-  targetId: task._id,
-  createdBy: req.user.name,
-});
+    userName: task.person,
+    title: "Task updated",
+    message: `Task updated: ${task.description}`,
+    type: "STATUS_UPDATE",
+    targetType: "Task",
+    targetId: task._id,
+    createdBy: req.user.name,
+  });
 
   res.json({ success: true, data: task });
 });
-
 const updateTestResult = asyncHandler(async (req, res) => {
   const { passed, remark } = req.body;
 
