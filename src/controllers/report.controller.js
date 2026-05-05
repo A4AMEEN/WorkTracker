@@ -38,7 +38,16 @@ const buildReportMatch = (query) => {
     }
   }
 
-  if (query.person) match.person = query.person;
+  if (query.person && query.person !== "All") {
+  const persons = String(query.person)
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  if (persons.length) {
+    match.person = { $in: persons };
+  }
+}
   if (query.module) match.module = query.module;
   if (query.status) match.status = query.status;
 
