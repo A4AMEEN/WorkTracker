@@ -46,6 +46,7 @@ app.use("/api/history", historyRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/bugs", require("./routes/bug.routes"));
+app.use("/api/backlogs", require("./routes/backlog.routes"));
 app.use("/api/notifications", require("./routes/notification.routes"));
 app.use(errorHandler);
 
