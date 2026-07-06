@@ -44,6 +44,7 @@ const taskSchema = new mongoose.Schema(
         "Testing",
         "Test Done",
         "Rework",
+        "Completed",
       ],
       default: "Pending",
     },
@@ -97,7 +98,31 @@ const taskSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-
+    approverUserId: {
+      type: String,
+      default: "",
+    },
+    approvalStatus: {
+      type: String,
+      enum: ["NotRequired", "Pending", "Approved", "Rework"],
+      default: "NotRequired",
+    },
+    approvedBy: {
+      type: String,
+      default: "",
+    },
+    approvedDate: {
+      type: Date,
+      default: null,
+    },
+    approverRemarks: {
+      type: String,
+      default: "",
+    },
+    reworkReason: {
+      type: String,
+      default: "",
+    },
     attachments: [
       {
         originalName: String,
@@ -113,7 +138,7 @@ const taskSchema = new mongoose.Schema(
       },
     ],
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 taskSchema.index({

@@ -1,6 +1,7 @@
 const Bug = require("../models/bugs");
 const Task = require("../models/Task");
 const { createNotification } = require("../utils/notify");
+const { getIO } = require("../socket");
 // GET ALL
 exports.getBugs = async (req, res) => {
   const bugs = await Bug.find().sort({ createdAt: -1 });
@@ -138,6 +139,8 @@ exports.convertToTask = async (req, res) => {
 
   if (!bug) return res.status(404).json({ message: "Bug not found" });
 
+  const approverUserId = req.body.approverUserId || "";
+
   const task = await Task.create({
     date: new Date().toISOString().split("T")[0],
     day: new Date().toLocaleDateString("en-US", { weekday: "long" }),
@@ -155,21 +158,30 @@ exports.convertToTask = async (req, res) => {
     updatedBy: req.user.name,
 
     attachments: bug.attachments,
+
+    approverUserId,
+    approvalStatus: "NotRequired",
   });
 
   bug.linkedTaskId = task._id;
   bug.status = "Assigned";
 
   await bug.save();
+
   await createNotification({
-  userName: task.person,
-  title: "Bug converted to task",
-  message: `Bug converted and assigned to you: ${bug.title}`,
-  type: "BUG_TO_TASK",
-  targetType: "Task",
-  targetId: task._id,
-  createdBy: req.user.name,
-});
+    userName: task.person,
+    title: "Bug converted to task",
+    message: `Bug converted and assigned to you: ${bug.title}`,
+    type: "BUG_TO_TASK",
+    targetType: "Task",
+    targetId: task._id,
+    createdBy: req.user.name,
+  });
+
+  try {
+    getIO().emit("task:created", task.toObject());
+    getIO().emit("task:updated", task.toObject());
+  } catch (_) {}
 
   res.json({
     success: true,

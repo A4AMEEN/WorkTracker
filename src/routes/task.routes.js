@@ -6,6 +6,8 @@ const {
   createTask,
   updateTask,
   updateTaskStatus,
+  approveTask,
+  reworkTask,
   updateTestResult,
   deleteTaskAttachment,
   deleteTask,
@@ -37,6 +39,8 @@ router.put(
 );
 
 router.patch("/:id/status", allowRoles("Admin", "Developer"), updateTaskStatus);
+router.patch("/:id/approve", allowRoles("Admin", "Developer"), approveTask);
+router.patch("/:id/rework", allowRoles("Admin", "Developer"), reworkTask);
 router.patch("/:id/test-result", allowRoles("Admin", "Developer"), updateTestResult);
 router.delete(
   "/:id/attachments/:fileName",

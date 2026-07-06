@@ -3,6 +3,16 @@ const TaskHistory = require("../models/TaskHistory");
 const asyncHandler = require("../utils/asyncHandler");
 const { toDateOnly, getDayName } = require("../utils/dateUtils");
 const { createNotification } = require("../utils/notify");
+const path = require("path");
+const fs = require("fs");
+const { getIO } = require("../socket");
+
+function emitTaskUpdate(task) {
+  try {
+    getIO().emit("task:updated", task.toObject());
+  } catch (_) {}
+}
+
 const carryForwardStatuses = [
   "Pending",
   "Working",
@@ -34,7 +44,7 @@ const mapAttachments = (files = [], userName) => {
   return files.map((file) => ({
     originalName: file.originalname,
     fileName: file.filename,
-    filePath: file.path, // Cloudinary URL,
+    filePath: file.path,
     mimeType: file.mimetype,
     size: file.size,
     uploadedBy: userName,
@@ -48,9 +58,18 @@ const buildTaskFilter = (query) => {
   if (query.person) filter.person = query.person;
   if (query.module) filter.module = query.module;
   if (query.page) filter.page = query.page;
-  if (query.status) filter.status = query.status;
   if (query.priority) filter.priority = query.priority;
   if (query.workingType) filter.workingType = query.workingType;
+  if (query.approverUserId) filter.approverUserId = query.approverUserId;
+  if (query.approvalStatus) filter.approvalStatus = query.approvalStatus;
+
+  if (query.status) {
+    if (query.status.includes(",")) {
+      filter.status = { $in: query.status.split(",") };
+    } else {
+      filter.status = query.status;
+    }
+  }
 
   if (query.from || query.to) {
     filter.date = {};
@@ -145,6 +164,9 @@ const createTask = asyncHandler(async (req, res) => {
       ? new Date(`${finalDeadlineDate}T${finalDeadlineTime}:00`)
       : null;
 
+  const approverUserId = req.body.approverUserId || "";
+  const approvalStatus = approverUserId ? "NotRequired" : "NotRequired";
+
   const task = await Task.create({
     date,
     day: getDayName(date),
@@ -162,19 +184,20 @@ const createTask = asyncHandler(async (req, res) => {
     deadlineTime: finalDeadlineTime,
     deadlineAt,
     estimatedHours: Number(req.body.estimatedHours || 0),
-
+    approverUserId,
+    approvalStatus,
     attachments,
   });
 
   await createNotification({
-  userName: task.person,
-  title: "New task assigned",
-  message: `${task.createdBy} assigned you a task: ${task.description}`,
-  type: "TASK_ASSIGNED",
-  targetType: "Task",
-  targetId: task._id,
-  createdBy: req.user.name,
-});
+    userName: task.person,
+    title: "New task assigned",
+    message: `${task.createdBy} assigned you a task: ${task.description}`,
+    type: "TASK_ASSIGNED",
+    targetType: "Task",
+    targetId: task._id,
+    createdBy: req.user.name,
+  });
 
   await addHistory({
     task,
@@ -193,6 +216,12 @@ const createTask = asyncHandler(async (req, res) => {
       remark: "Attachment uploaded",
     });
   }
+
+  try {
+    getIO().emit("task:created", task.toObject());
+  } catch (_) {}
+
+  emitTaskUpdate(task);
 
   res.status(201).json({ success: true, data: task });
 });
@@ -220,6 +249,7 @@ const updateTask = asyncHandler(async (req, res) => {
     "deadlineDate",
     "deadlineTime",
     "estimatedHours",
+    "approverUserId",
   ];
 
   for (const field of editableFields) {
@@ -258,21 +288,34 @@ const updateTask = asyncHandler(async (req, res) => {
       remark: "Attachment uploaded",
     });
   }
-const finalDeadlineDate = task.deadlineDate || task.date;
-const finalDeadlineTime = task.deadlineTime || "";
 
-if (finalDeadlineTime) {
-  task.deadlineDate = finalDeadlineDate;
-  task.deadlineTime = finalDeadlineTime;
-  task.deadlineAt = new Date(`${finalDeadlineDate}T${finalDeadlineTime}:00`);
-} else {
-  task.deadlineDate = "";
-  task.deadlineTime = "";
-  task.deadlineAt = null;
-}
+  const finalDeadlineDate = task.deadlineDate || task.date;
+  const finalDeadlineTime = task.deadlineTime || "";
+
+  if (finalDeadlineTime) {
+    task.deadlineDate = finalDeadlineDate;
+    task.deadlineTime = finalDeadlineTime;
+    task.deadlineAt = new Date(`${finalDeadlineDate}T${finalDeadlineTime}:00`);
+  } else {
+    task.deadlineDate = "";
+    task.deadlineTime = "";
+    task.deadlineAt = null;
+  }
+
+  if (req.body.approverUserId !== undefined) {
+    const newApprover = req.body.approverUserId;
+    if (newApprover !== task.approverUserId) {
+      task.approverUserId = newApprover;
+      if (task.approvalStatus === "Pending") {
+        task.approvalStatus = "NotRequired";
+      }
+    }
+  }
 
   task.updatedBy = req.user.name;
   await task.save();
+
+  emitTaskUpdate(task);
 
   res.json({ success: true, data: task });
 });
@@ -301,12 +344,47 @@ const updateTaskStatus = asyncHandler(async (req, res) => {
       remark: remark || "",
     });
 
-    task.status = status;
+    if (status === "Done") {
+      const needsApproval =
+        task.approverUserId &&
+        task.approverUserId !== "" &&
+        task.approverUserId !== task.person;
 
-    if (status === "Done" || status === "Test Done") {
-      task.completedAt = new Date();
+      if (needsApproval) {
+        task.approvalStatus = "Pending";
+        task.status = "Done";
+        task.completedAt = null;
+
+        await createNotification({
+          userName: task.approverUserId,
+          title: "Task pending approval",
+          message: `${req.user.name} submitted a task for your approval: ${task.description}`,
+          type: "APPROVAL_PENDING",
+          targetType: "Task",
+          targetId: task._id,
+          createdBy: req.user.name,
+        });
+      } else {
+        task.approvalStatus = "NotRequired";
+        task.status = "Completed";
+        task.completedAt = new Date();
+
+        await createNotification({
+          userName: task.person,
+          title: "Task completed",
+          message: `Task completed: ${task.description}`,
+          type: "STATUS_UPDATE",
+          targetType: "Task",
+          targetId: task._id,
+          createdBy: req.user.name,
+        });
+      }
     } else {
-      task.completedAt = null;
+      task.status = status;
+      task.completedAt =
+        status === "Done" || status === "Test Done" || status === "Completed"
+          ? new Date()
+          : null;
     }
   }
 
@@ -319,18 +397,134 @@ const updateTaskStatus = asyncHandler(async (req, res) => {
       changedBy: req.user.name,
       remark,
     });
-
     task.remarks = remark;
   }
 
   task.updatedBy = req.user.name;
   await task.save();
 
+  if (oldStatus !== status && status !== "Done") {
+    await createNotification({
+      userName: task.person,
+      title: "Task updated",
+      message: `Task updated: ${task.description}`,
+      type: "STATUS_UPDATE",
+      targetType: "Task",
+      targetId: task._id,
+      createdBy: req.user.name,
+    });
+  }
+
+  emitTaskUpdate(task);
+
+  res.json({ success: true, data: task });
+});
+
+const approveTask = asyncHandler(async (req, res) => {
+  const task = await Task.findById(req.params.id);
+
+  if (!task) {
+    return res.status(404).json({
+      success: false,
+      message: "Task not found.",
+    });
+  }
+
+  if (task.approvalStatus !== "Pending") {
+    return res.status(400).json({
+      success: false,
+      message: "Task is not pending approval.",
+    });
+  }
+
+  const oldStatus = task.status;
+
+  task.status = "Completed";
+  task.approvalStatus = "Approved";
+  task.approvedBy = req.user.name;
+  task.approvedDate = new Date();
+  task.approverRemarks = req.body.remarks || "";
+  task.completedAt = new Date();
+  task.updatedBy = req.user.name;
+
+  await task.save();
+
+  await addHistory({
+    task,
+    field: "status",
+    oldVal: oldStatus,
+    newVal: "Completed",
+    changedBy: req.user.name,
+    remark: `Approved: ${req.body.remarks || "Approved"}`,
+  });
+
   await createNotification({
     userName: task.person,
-    title: "Task updated",
-    message: `Task updated: ${task.description}`,
-    type: "STATUS_UPDATE",
+    title: "Task approved",
+    message: `${req.user.name} approved your task: ${task.description}`,
+    type: "APPROVAL_APPROVED",
+    targetType: "Task",
+    targetId: task._id,
+    createdBy: req.user.name,
+  });
+
+  emitTaskUpdate(task);
+
+  res.json({ success: true, data: task });
+});
+
+const reworkTask = asyncHandler(async (req, res) => {
+  const { reworkReason, remarks } = req.body;
+
+  if (!reworkReason || !reworkReason.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: "Rework reason is required.",
+    });
+  }
+
+  const task = await Task.findById(req.params.id);
+
+  if (!task) {
+    return res.status(404).json({
+      success: false,
+      message: "Task not found.",
+    });
+  }
+
+  if (task.approvalStatus !== "Pending") {
+    return res.status(400).json({
+      success: false,
+      message: "Task is not pending approval.",
+    });
+  }
+
+  const oldStatus = task.status;
+
+  task.status = "Rework";
+  task.approvalStatus = "Rework";
+  task.reworkReason = reworkReason.trim();
+  task.reworkCount = (task.reworkCount || 0) + 1;
+  task.approverRemarks = remarks || "";
+  task.completedAt = null;
+  task.updatedBy = req.user.name;
+
+  await task.save();
+
+  await addHistory({
+    task,
+    field: "status",
+    oldVal: oldStatus,
+    newVal: "Rework",
+    changedBy: req.user.name,
+    remark: `Rework: ${reworkReason}`,
+  });
+
+  await createNotification({
+    userName: task.person,
+    title: "Task sent for rework",
+    message: `${req.user.name} requested rework on your task: ${task.description}. Reason: ${reworkReason}`,
+    type: "APPROVAL_REWORK",
     targetType: "Task",
     targetId: task._id,
     createdBy: req.user.name,
@@ -338,6 +532,7 @@ const updateTaskStatus = asyncHandler(async (req, res) => {
 
   res.json({ success: true, data: task });
 });
+
 const updateTestResult = asyncHandler(async (req, res) => {
   const { passed, remark } = req.body;
 
@@ -362,14 +557,14 @@ const updateTestResult = asyncHandler(async (req, res) => {
     task.testRemarks = remark || "Testing failed, rework needed";
     task.reworkCount = (task.reworkCount || 0) + 1;
     await createNotification({
-  userName: task.person,
-  title: "Rework assigned",
-  message: `Testing failed. Rework needed: ${task.description}`,
-  type: "REWORK",
-  targetType: "Task",
-  targetId: task._id,
-  createdBy: req.user.name,
-});
+      userName: task.person,
+      title: "Rework assigned",
+      message: `Testing failed. Rework needed: ${task.description}`,
+      type: "REWORK",
+      targetType: "Task",
+      targetId: task._id,
+      createdBy: req.user.name,
+    });
   }
 
   task.updatedBy = req.user.name;
@@ -383,6 +578,8 @@ const updateTestResult = asyncHandler(async (req, res) => {
     changedBy: req.user.name,
     remark: task.testRemarks,
   });
+
+  emitTaskUpdate(task);
 
   res.json({
     success: true,
@@ -411,6 +608,10 @@ const deleteTask = asyncHandler(async (req, res) => {
 
   await task.deleteOne();
 
+  try {
+    getIO().emit("task:deleted", task._id);
+  } catch (_) {}
+
   res.json({ success: true, message: "Task deleted." });
 });
 
@@ -427,7 +628,7 @@ const deleteTaskAttachment = asyncHandler(async (req, res) => {
   }
 
   const attachment = (task.attachments || []).find(
-    (file) => file.fileName === fileName,
+    (file) => file.fileName === fileName
   );
 
   if (!attachment) {
@@ -438,7 +639,7 @@ const deleteTaskAttachment = asyncHandler(async (req, res) => {
   }
 
   task.attachments = task.attachments.filter(
-    (file) => file.fileName !== fileName,
+    (file) => file.fileName !== fileName
   );
 
   const filePath = path.join(process.cwd(), "uploads", "tasks", fileName);
@@ -465,6 +666,7 @@ const deleteTaskAttachment = asyncHandler(async (req, res) => {
     data: task,
   });
 });
+
 module.exports = {
   getTasks,
   getTodayTasks,
@@ -472,6 +674,8 @@ module.exports = {
   createTask,
   updateTask,
   updateTaskStatus,
+  approveTask,
+  reworkTask,
   updateTestResult,
   deleteTask,
   deleteTaskAttachment,
