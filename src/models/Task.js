@@ -1,5 +1,13 @@
 const mongoose = require("mongoose");
 
+const subtaskSchema = new mongoose.Schema({
+  description: { type: String, required: true },
+  assignedTo: { type: String, required: true },
+  isCompleted: { type: Boolean, default: false },
+  completedBy: { type: String, default: "" },
+  completedAt: { type: Date, default: null },
+});
+
 const taskSchema = new mongoose.Schema(
   {
     date: {
@@ -60,6 +68,16 @@ const taskSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    taskTitle: {
+      type: String,
+      default: "",
+    },
+    isMultiAssignment: {
+      type: Boolean,
+      default: false,
+    },
+    assignedUsers: [{ type: String }],
+    subtasks: [subtaskSchema],
     person: {
       type: String,
       required: true,

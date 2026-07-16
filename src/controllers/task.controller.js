@@ -55,7 +55,12 @@ const buildTaskFilter = (query) => {
   const filter = {};
 
   if (query.date) filter.date = query.date;
-  if (query.person) filter.person = query.person;
+  if (query.person) {
+    filter.$or = [
+      { person: query.person },
+      { assignedUsers: query.person },
+    ];
+  }
   if (query.module) filter.module = query.module;
   if (query.page) filter.page = query.page;
   if (query.priority) filter.priority = query.priority;
@@ -167,12 +172,34 @@ const createTask = asyncHandler(async (req, res) => {
   const approverUserId = req.body.approverUserId || "";
   const approvalStatus = approverUserId ? "NotRequired" : "NotRequired";
 
+  const isMultiAssignment = req.body.isMultiAssignment === true || req.body.isMultiAssignment === "true";
+  let assignedUsers = [];
+  if (isMultiAssignment && req.body.assignedUsers) {
+    try {
+      assignedUsers = typeof req.body.assignedUsers === "string"
+        ? JSON.parse(req.body.assignedUsers)
+        : req.body.assignedUsers;
+    } catch (_) {
+      assignedUsers = [];
+    }
+  }
+  let subtasks = [];
+  if (isMultiAssignment && req.body.subtasks) {
+    try {
+      subtasks = typeof req.body.subtasks === "string"
+        ? JSON.parse(req.body.subtasks)
+        : req.body.subtasks;
+    } catch (_) {
+      subtasks = [];
+    }
+  }
+
   const task = await Task.create({
     date,
     day: getDayName(date),
     module: req.body.module,
     page: req.body.page,
-    description: req.body.description,
+    description: isMultiAssignment ? `Multi-assign (${assignedUsers.length} users)` : req.body.description,
     workingType: req.body.workingType,
     status: req.body.status || "Pending",
     person: req.body.person,
@@ -187,17 +214,27 @@ const createTask = asyncHandler(async (req, res) => {
     approverUserId,
     approvalStatus,
     attachments,
+    taskTitle: req.body.taskTitle || "",
+    isMultiAssignment,
+    assignedUsers,
+    subtasks,
   });
 
-  await createNotification({
-    userName: task.person,
-    title: "New task assigned",
-    message: `${task.createdBy} assigned you a task: ${task.description}`,
-    type: "TASK_ASSIGNED",
-    targetType: "Task",
-    targetId: task._id,
-    createdBy: req.user.name,
-  });
+  const notifyUsers = isMultiAssignment && assignedUsers.length
+    ? assignedUsers
+    : [task.person];
+
+  for (const userName of notifyUsers) {
+    await createNotification({
+      userName,
+      title: "New task assigned",
+      message: `${task.createdBy} assigned you a task: ${task.description}`,
+      type: "TASK_ASSIGNED",
+      targetType: "Task",
+      targetId: task._id,
+      createdBy: req.user.name,
+    });
+  }
 
   await addHistory({
     task,
@@ -250,6 +287,10 @@ const updateTask = asyncHandler(async (req, res) => {
     "deadlineTime",
     "estimatedHours",
     "approverUserId",
+    "isMultiAssignment",
+    "taskTitle",
+    "assignedUsers",
+    "subtasks",
   ];
 
   for (const field of editableFields) {
@@ -268,6 +309,18 @@ const updateTask = asyncHandler(async (req, res) => {
 
       task[field] = req.body[field];
     }
+  }
+
+  // Parse JSON string fields from FormData
+  if (req.body.subtasks && typeof req.body.subtasks === "string") {
+    try {
+      task.subtasks = JSON.parse(req.body.subtasks);
+    } catch (_) {}
+  }
+  if (req.body.assignedUsers && typeof req.body.assignedUsers === "string") {
+    try {
+      task.assignedUsers = JSON.parse(req.body.assignedUsers);
+    } catch (_) {}
   }
 
   if (req.body.date) {
@@ -587,6 +640,70 @@ const updateTestResult = asyncHandler(async (req, res) => {
   });
 });
 
+const completeSubtask = asyncHandler(async (req, res) => {
+  const { id, subtaskId } = req.params;
+  const { isCompleted } = req.body;
+
+  const task = await Task.findById(id);
+
+  if (!task) {
+    return res.status(404).json({
+      success: false,
+      message: "Task not found.",
+    });
+  }
+
+  const subtask = task.subtasks.id(subtaskId);
+
+  if (!subtask) {
+    return res.status(404).json({
+      success: false,
+      message: "Subtask not found.",
+    });
+  }
+
+  const isAssignee = subtask.assignedTo === req.user.name;
+  const isAdmin = req.user.role === "Admin";
+
+  if (!isAssignee && !isAdmin) {
+    return res.status(403).json({
+      success: false,
+      message: "Only the assigned user or an Admin can complete this subtask.",
+    });
+  }
+
+  const oldState = subtask.isCompleted;
+
+  subtask.isCompleted = isCompleted === true || isCompleted === "true";
+  subtask.completedBy = subtask.isCompleted ? req.user.name : "";
+  subtask.completedAt = subtask.isCompleted ? new Date() : null;
+
+  task.updatedBy = req.user.name;
+  await task.save();
+
+  // Auto-complete main task if all subtasks done
+  const allDone = task.subtasks.length > 0 && task.subtasks.every((st) => st.isCompleted);
+  if (allDone) {
+    task.status = "Done";
+    task.completedAt = new Date();
+    task.updatedBy = req.user.name;
+    await task.save();
+  }
+
+  await addHistory({
+    task,
+    field: "subtask",
+    oldVal: subtask.description,
+    newVal: subtask.isCompleted ? "Completed" : "Reopened",
+    changedBy: req.user.name,
+    remark: `Subtask completed by ${subtask.assignedTo}`,
+  });
+
+  emitTaskUpdate(task);
+
+  res.json({ success: true, data: task });
+});
+
 const deleteTask = asyncHandler(async (req, res) => {
   const task = await Task.findById(req.params.id);
 
@@ -677,6 +794,7 @@ module.exports = {
   approveTask,
   reworkTask,
   updateTestResult,
+  completeSubtask,
   deleteTask,
   deleteTaskAttachment,
 };

@@ -9,6 +9,7 @@ const {
   approveTask,
   reworkTask,
   updateTestResult,
+  completeSubtask,
   deleteTaskAttachment,
   deleteTask,
 } = require("../controllers/task.controller");
@@ -42,6 +43,7 @@ router.patch("/:id/status", allowRoles("Admin", "Developer"), updateTaskStatus);
 router.patch("/:id/approve", allowRoles("Admin", "Developer"), approveTask);
 router.patch("/:id/rework", allowRoles("Admin", "Developer"), reworkTask);
 router.patch("/:id/test-result", allowRoles("Admin", "Developer"), updateTestResult);
+router.patch("/:id/subtasks/:subtaskId", allowRoles("Admin", "Developer"), completeSubtask);
 router.delete(
   "/:id/attachments/:fileName",
   allowRoles("Admin", "Developer"),
