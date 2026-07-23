@@ -48,6 +48,7 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/bugs", require("./routes/bug.routes"));
 app.use("/api/backlogs", require("./routes/backlog.routes"));
 app.use("/api/notifications", require("./routes/notification.routes"));
+app.use("/api/snippets", require("./routes/snippet.routes"));
 app.use(errorHandler);
 
 module.exports = app;
