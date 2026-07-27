@@ -1,6 +1,6 @@
 const Task = require("../models/Task");
 const asyncHandler = require("../utils/asyncHandler");
-const { toDateOnly } = require("../utils/dateUtils");
+const { toDateOnly, getWeekRange, getMonthLabel, getMonthRange } = require("../utils/dateUtils");
 
 const getDateRange = (date) => {
   const start = new Date(`${date}T00:00:00.000`);
@@ -190,7 +190,120 @@ WorkTrack`;
   });
 });
 
+const getUserReport = asyncHandler(async (req, res) => {
+  const { from, to, person, status, groupBy } = req.query;
+
+  const match = {};
+
+  if (from || to) {
+    match.date = {};
+    if (from) match.date.$gte = from;
+    if (to) match.date.$lte = to;
+  }
+
+  if (person) {
+    const persons = String(person)
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (persons.length) match.person = { $in: persons };
+  }
+
+  if (status) {
+    const statuses = String(status)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (statuses.length) match.status = { $in: statuses };
+  }
+
+  const tasks = await Task.find(match).sort({ date: 1, person: 1 }).lean();
+
+  const completedStatuses = ["Completed", "Done", "Test Done"];
+
+  const periods = {};
+
+  for (const task of tasks) {
+    let periodKey, periodLabel;
+
+    if (groupBy === "weekly") {
+      const range = getWeekRange(task.date);
+      periodKey = `${range.year}-W${range.weekNumber}`;
+      periodLabel = range.label;
+    } else if (groupBy === "monthly") {
+      const month = task.date.substring(0, 7);
+      periodKey = month;
+      periodLabel = getMonthLabel(task.date);
+    } else {
+      periodKey = task.date;
+      periodLabel = task.date;
+    }
+
+    if (!periods[periodKey]) {
+      periods[periodKey] = { label: periodLabel, users: {} };
+    }
+
+    const p = task.person || "Unassigned";
+    if (!periods[periodKey].users[p]) {
+      periods[periodKey].users[p] = {
+        person: p,
+        total: 0,
+        completed: 0,
+        statuses: {},
+        tasks: [],
+      };
+    }
+
+    const u = periods[periodKey].users[p];
+    u.total++;
+    u.statuses[task.status] = (u.statuses[task.status] || 0) + 1;
+    if (completedStatuses.includes(task.status)) u.completed++;
+    u.tasks.push({
+      _id: task._id,
+      date: task.date,
+      day: task.day,
+      module: task.module,
+      page: task.page,
+      description: task.description,
+      status: task.status,
+      priority: task.priority,
+      workingType: task.workingType,
+      completedAt: task.completedAt,
+      remarks: task.remarks,
+    });
+  }
+
+  const result = Object.entries(periods).map(([key, period]) => ({
+    key,
+    label: period.label,
+    users: Object.values(period.users).map((u) => ({
+      ...u,
+      completionRate: u.total > 0 ? Math.round((u.completed / u.total) * 100) : 0,
+    })),
+  }));
+
+  const totalTasks = tasks.length;
+  const completedTasks = tasks.filter((t) => completedStatuses.includes(t.status)).length;
+  const allPersons = [...new Set(tasks.map((t) => t.person || "Unassigned"))];
+
+  res.json({
+    success: true,
+    data: {
+      periods: result,
+      summary: {
+        totalTasks,
+        completedTasks,
+        pendingTasks: totalTasks - completedTasks,
+        completionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+        totalUsers: allPersons.length,
+        activeUsers: allPersons,
+      },
+    },
+  });
+});
+
 module.exports = {
   getSummaryReport,
   getDailyWhatsAppReport,
+  getUserReport,
 };
