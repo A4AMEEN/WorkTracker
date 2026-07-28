@@ -1,4 +1,5 @@
 const Task = require("../models/Task");
+const Bug = require("../models/bugs");
 const asyncHandler = require("../utils/asyncHandler");
 const { toDateOnly, getWeekRange, getMonthLabel, getMonthRange } = require("../utils/dateUtils");
 
@@ -103,6 +104,7 @@ const getDailyWhatsAppReport = asyncHandler(async (req, res) => {
   const mode = req.query.mode || "taskDate";
 
   const match = buildReportMatch({ ...req.query, date, mode });
+  const { start, end } = getDateRange(date);
 
   const tasks = await Task.find(match).sort({
     status: 1,
@@ -110,6 +112,30 @@ const getDailyWhatsAppReport = asyncHandler(async (req, res) => {
     completedAt: -1,
     createdAt: -1,
   });
+
+  // Fetch fixed/closed bugs matching person and date filters
+  const personParam = req.query.person;
+  const bugFilter = { status: { $in: ["Fixed", "Closed"] } };
+
+  if (personParam && personParam !== "All") {
+    const persons = String(personParam).split(",").map(p => p.trim()).filter(Boolean);
+    if (persons.length) {
+      bugFilter.assignedTo = { $in: persons };
+    }
+  }
+
+  if (mode === "completedOn") {
+    bugFilter.updatedAt = { $gte: start, $lte: end };
+  } else if (mode === "both") {
+    bugFilter.$or = [
+      { createdAt: { $gte: start, $lte: end } },
+      { updatedAt: { $gte: start, $lte: end } },
+    ];
+  } else {
+    bugFilter.createdAt = { $gte: start, $lte: end };
+  }
+
+  const fixedBugs = await Bug.find(bugFilter).sort({ updatedAt: -1 }).lean();
 
   const pending = tasks.filter((t) => t.status === "Pending");
   const working = tasks.filter((t) => t.status === "Working");
@@ -132,21 +158,28 @@ const getDailyWhatsAppReport = asyncHandler(async (req, res) => {
       `\n${title}:\n` +
       list
         .map((t, i) => {
-          const completedText = t.completedAt
-            ? ` | Completed: ${new Date(t.completedAt).toLocaleString()}`
-            : "";
-
-          return `${i + 1}. ${t.person} - ${t.module} / ${t.page}: ${t.description}${completedText}`;
+          return `${i + 1}. ${t.module} / ${t.page}: ${t.description}`;
         })
         .join("\n")
     );
   };
+
+  // Build combined completed section: done tasks + fixed bugs
+  const completedItems = [
+    ...done.map(t => `${t.module} / ${t.page}: ${t.description}`),
+    ...fixedBugs.map(b => `🐛 ${b.module ? b.module + ' / ' : ''}${b.page ? b.page + ': ' : ''}${b.title}`),
+  ];
+
+  const completedSection = completedItems.length
+    ? `\n✅ Completed (${completedItems.length}):\n` + completedItems.map((item, i) => `${i + 1}. ${item}`).join('\n')
+    : '\n✅ Completed: Nil';
 
   const message = `📌 WorkTrack Daily Report
 Date: ${date}
 Mode: ${modeTitle}
 
 Total Tasks: ${tasks.length}
+🐛 Bugs Fixed: ${fixedBugs.length}
 ✅ Done: ${done.length}
 ⏳ Pending: ${pending.length}
 🔵 Working: ${working.length}
@@ -154,7 +187,7 @@ Total Tasks: ${tasks.length}
 🔴 Backend Needed: ${backend.length}
 🔁 Rework: ${rework.length}
 
-${formatList("✅ Completed", done)}
+${completedSection}
 
 ${formatList("🔵 Working", working)}
 
@@ -178,6 +211,7 @@ WorkTrack`;
       summary: {
         total: tasks.length,
         done: done.length,
+        bugsFixed: fixedBugs.length,
         pending: pending.length,
         working: working.length,
         testing: testing.length,
@@ -185,6 +219,7 @@ WorkTrack`;
         rework: rework.length,
       },
       tasks,
+      fixedBugs,
       message,
     },
   });
