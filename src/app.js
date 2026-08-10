@@ -16,6 +16,7 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:4200",
   "https://erp-tracker-sigma.vercel.app",
+  "https://work-tracker-ten-omega.vercel.app",
 ];
 
 app.use(cors({
